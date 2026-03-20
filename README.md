@@ -1,4 +1,4 @@
-## Official ComfyUI Support - InfiniteYou: Flexible Photo Recrafting While Preserving Your Identity (ICCV 2025 Highlight)
+## ComfyUI_F2_InfiniteYou - FLUX Compatibility Build for InfiniteYou
 
 <div align="center">
 
@@ -10,7 +10,7 @@
 
 </div>
 
-This repository provides the official ComfyUI native node supporting [**InfiniteYou**](https://github.com/bytedance/InfiniteYou) with FLUX.
+This repository provides a compatibility-focused ComfyUI node pack for [**InfiniteYou**](https://github.com/bytedance/InfiniteYou) with FLUX.
 
 ![teaser](examples/teaser.jpg)
 
@@ -42,13 +42,14 @@ This node adds InfiniteYou‑FLUX support to ComfyUI. In [infinite_you_workflow.
 2. Clone this repo under `ComfyUI/custom_nodes` and install the dependencies:
 ```
 cd ComfyUI/custom_nodes
-git clone https://github.com/bytedance/ComfyUI_InfiniteYou.git
+git clone https://github.com/bytedance/ComfyUI_InfiniteYou.git ComfyUI_F2_InfiniteYou
 
-cd ComfyUI_InfiniteYou
+cd ComfyUI_F2_InfiniteYou
 pip install -r requirements.txt
 ```
 
-* Our InfiniteYou node has been added to the official Comfy Registry to ease installation: https://registry.comfy.org/publishers/yuminjia/nodes/infiniteyou. Therefore, you can also search `ComfyUI_InfiniteYou` in the ComfyUI Node Manager to install this official node.
+* This pack is namespaced for side-by-side usage with the original node pack.
+* In ComfyUI, this pack appears under category `f2_infinite_you`, and node identifiers are prefixed with `F2_` to avoid collisions.
 
 
 ### Memory Requirements
@@ -63,6 +64,21 @@ The full-performance BF16 model inference requires a peak VRAM of around **43GB*
 2. Import the [workflow](examples/infinite_you_workflow.json) from the [examples folder](./examples). Please use [multi-id workflow](examples/multi_id_infinite_you_workflow.json) if needed.
 
 * Some [important usage tips](https://github.com/bytedance/InfiniteYou?tab=readme-ov-file#-important-usage-tips) can be found in our main InfiniteYou repository.
+
+### FLUX compatibility notes
+
+- The released InfiniteYou checkpoints in this repository are **native to FLUX.1-style conditioning**.
+- This custom node now accepts newer ComfyUI FLUX call patterns more gracefully, including cases where pooled conditioning is supplied through keyword arguments instead of as a positional `y` argument.
+- **FLUX.2 dev support should be treated as best-effort compatibility**, not as a retrained FLUX.2-native implementation. If your FLUX.2 workflow does not expose a FLUX-style pooled conditioning tensor, the node will stop with a targeted compatibility error instead of a raw Python `TypeError`.
+- The current checkpoints and image projection weights also assume the original InfiniteYou FLUX hidden-width layout. If a FLUX.2 setup uses different text-conditioning or model hidden dimensions, the node will now stop early with a dimension-mismatch error instead of failing deeper in sampling.
+- Patch layout and timestep embedding dimensions are now derived from the loaded control checkpoint where possible, which improves compatibility with FLUX-family variants that keep the same underlying InfiniteYou weight format.
+- For the highest chance of success, use FLUX-family text encoders / VAE combinations that preserve the standard pooled conditioning path expected by current FLUX.1 InfiniteYou checkpoints.
+
+### Coexistence with ComfyUI_InfiniteYou
+
+- This package is intentionally rebranded as **ComfyUI_F2_InfiniteYou** so it can be installed alongside the original **ComfyUI_InfiniteYou**.
+- Runtime node IDs are prefixed with `F2_` and grouped under category `f2_infinite_you`.
+- Model files are still read from `ComfyUI/models/infinite_you/` to avoid duplicate downloads.
 
 
 ## 🏰 Required Models

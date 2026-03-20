@@ -30,7 +30,10 @@ from .utils import extract_arcface_bgr_embedding, tensor_to_np_image, np_image_t
 from .infuse_net import load_infuse_net_flux
 from .resampler import Resampler
 
-folder_paths.add_model_folder_path("infinite_you", os.path.join(folder_paths.models_dir, "infinite_you"))
+MODEL_KEY = "f2_infinite_you"
+MODEL_DIR = os.path.join(folder_paths.models_dir, "infinite_you")
+
+folder_paths.add_model_folder_path(MODEL_KEY, MODEL_DIR)
 
 class FaceDetector:
     def __init__(self, 
@@ -66,13 +69,13 @@ class IDEmbeddingModelLoader:
     RETURN_TYPES = ("MODEL", "MODEL", "MODEL")
 
     FUNCTION = "load_insightface"
-    CATEGORY = "infinite_you"
+    CATEGORY = "f2_infinite_you"
 
     def get_image_proj_names():
         names = [
             os.path.join("sim_stage1", "image_proj_model.bin"),
             os.path.join("aes_stage2", "image_proj_model.bin"),
-            *folder_paths.get_filename_list("infinite_you"),
+            *folder_paths.get_filename_list(MODEL_KEY),
         ]
         return list(filter(lambda x: x.endswith(".bin"), list(set(names))))
 
@@ -86,7 +89,7 @@ class IDEmbeddingModelLoader:
             snapshot_download(repo_id="MonsterMMORPG/tools", allow_patterns="*.onnx", local_dir=antelopev2_dir)
 
         # Download infinite you models
-        infinite_you_dir = os.path.join(folder_paths.models_dir, "infinite_you")
+        infinite_you_dir = MODEL_DIR
         image_proj_model_path = os.path.join(infinite_you_dir, image_proj_model_name)
         if not os.path.exists(image_proj_model_path):
             dst_dir = os.path.dirname(image_proj_model_path)
@@ -149,7 +152,7 @@ class ExtractFacePoseImage:
     
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "extract_face_pose"
-    CATEGORY = "infinite_you"
+    CATEGORY = "f2_infinite_you"
 
     def extract_face_pose(self, face_detector, image, width, height, mask = None):
         np_image = tensor_to_np_image(image)[0]
@@ -184,7 +187,7 @@ class ExtractIDEmbedding:
 
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "extract_id_embedding"
-    CATEGORY = "infinite_you"
+    CATEGORY = "f2_infinite_you"
     
     def extract_id_embedding(self, face_detector, arcface_model, image_proj_model, image):
         np_image = tensor_to_np_image(image)
@@ -221,17 +224,17 @@ class InfuseNetLoader:
             os.path.join("sim_stage1", "infusenet_sim_fp8e4m3fn.safetensors"),
             os.path.join("aes_stage2", "infusenet_aes_bf16.safetensors"),
             os.path.join("aes_stage2", "infusenet_aes_fp8e4m3fn.safetensors"),
-            *folder_paths.get_filename_list("infinite_you"),
+            *folder_paths.get_filename_list(MODEL_KEY),
         ]
         return list(filter(lambda x: x.endswith(".safetensors"), list(set(names))))
 
     RETURN_TYPES = ("CONTROL_NET",)
     FUNCTION = "load_controlnet"
 
-    CATEGORY = "infinite_you"
+    CATEGORY = "f2_infinite_you"
 
     def load_controlnet(self, controlnet_name):
-        infinite_you_dir = os.path.join(folder_paths.models_dir, "infinite_you")
+        infinite_you_dir = MODEL_DIR
         controlnet_path = os.path.join(infinite_you_dir, controlnet_name)
 
         if not os.path.exists(controlnet_path):
@@ -268,11 +271,42 @@ class InfuseNetApply:
     RETURN_NAMES = ("positive", "negative")
     FUNCTION = "apply_controlnet"
 
-    CATEGORY = "infinite_you"
+    CATEGORY = "f2_infinite_you"
+
+    def _validate_flux_compatibility(self, conditioning, id_embedding, control_net):
+        control_model = getattr(control_net, "control_model", None)
+        expected_hidden_size = getattr(control_model, "hidden_size", None)
+        actual_hidden_size = id_embedding.shape[-1]
+
+        if isinstance(expected_hidden_size, int) and expected_hidden_size > 0 and actual_hidden_size != expected_hidden_size:
+            raise ValueError(
+                f"The selected InfiniteYou image projection output width ({actual_hidden_size}) does not match the loaded InfuseNet hidden size ({expected_hidden_size}). "
+                "This usually means the checkpoint and projection model target different FLUX architectures. "
+                "The released InfiniteYou image projection weights are FLUX.1-oriented and may not be compatible with FLUX.2 models that use a different hidden size."
+            )
+
+        if conditioning is None or len(conditioning) == 0:
+            return
+
+        first_cond = conditioning[0][0]
+        if isinstance(first_cond, torch.Tensor) and first_cond.ndim >= 3 and first_cond.shape[-1] != actual_hidden_size:
+            raise ValueError(
+                f"The conditioning width ({first_cond.shape[-1]}) does not match the InfiniteYou projection width ({actual_hidden_size}). "
+                "This workflow is mixing incompatible text-encoder / diffusion-model dimensions for the selected InfiniteYou checkpoint."
+            )
 
     def apply_controlnet(self, positive, id_embedding, control_net, image, strength, start_percent, end_percent, negative = None, vae=None, control_mask=None, extra_concat=[]):
         if strength == 0:
             return (positive, negative)
+
+        if not isinstance(id_embedding, dict) or 'id_embedding' not in id_embedding:
+            raise ValueError("Expected 'id_embedding' conditioning produced by the Extract ID Embedding node.")
+
+        id_embedding_tensor = id_embedding['id_embedding']
+        if not isinstance(id_embedding_tensor, torch.Tensor):
+            raise ValueError("Expected 'id_embedding' to contain a torch.Tensor.")
+
+        self._validate_flux_compatibility(positive, id_embedding_tensor, control_net)
 
         if control_mask is not None:
             if control_mask.dim() > 3:
@@ -298,7 +332,7 @@ class InfuseNetApply:
                     c_net = cnets[prev_cnet]
                 else:
                     c_net = control_net.copy().set_cond_hint(control_hint, strength, (start_percent, end_percent), vae=vae, extra_concat=extra_concat)
-                    c_net.id_embedding = id_embedding['id_embedding']
+                    c_net.id_embedding = id_embedding_tensor
                     c_net.set_previous_controlnet(prev_cnet)
                     c_net.set_extra_arg("control_mask", control_mask)
                     cnets[prev_cnet] = c_net
@@ -311,17 +345,17 @@ class InfuseNetApply:
         return (out[0], out[1])
 
 NODE_CLASS_MAPPINGS = {
-    "IDEmbeddingModelLoader": IDEmbeddingModelLoader,
-    "ExtractIDEmbedding": ExtractIDEmbedding,
-    "ExtractFacePoseImage": ExtractFacePoseImage,
-    "InfuseNetApply": InfuseNetApply,
-    "InfuseNetLoader": InfuseNetLoader,
+    "F2_IDEmbeddingModelLoader": IDEmbeddingModelLoader,
+    "F2_ExtractIDEmbedding": ExtractIDEmbedding,
+    "F2_ExtractFacePoseImage": ExtractFacePoseImage,
+    "F2_InfuseNetApply": InfuseNetApply,
+    "F2_InfuseNetLoader": InfuseNetLoader,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "IDEmbeddingModelLoader": "ID Embedding Model Loader",
-    "ExtractIDEmbedding": "Extract ID Embedding",
-    "ExtractFacePoseImage": "Extract Face Pose Image",
-    "InfuseNetApply": "Apply InfuseNet",
-    "InfuseNetLoader": "Load InfuseNet",
+    "F2_IDEmbeddingModelLoader": "F2 ID Embedding Model Loader",
+    "F2_ExtractIDEmbedding": "F2 Extract ID Embedding",
+    "F2_ExtractFacePoseImage": "F2 Extract Face Pose Image",
+    "F2_InfuseNetApply": "F2 Apply InfuseNet",
+    "F2_InfuseNetLoader": "F2 Load InfuseNet",
 }

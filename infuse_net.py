@@ -23,6 +23,75 @@ from comfy.ldm.flux.model import Flux
 from comfy.ldm.flux.layers import (timestep_embedding)
 import comfy.ldm.common_dit
 
+
+def _first_present(mapping, *keys):
+    for key in keys:
+        if key in mapping:
+            value = mapping[key]
+            if value is not None:
+                return value
+    return None
+
+
+def _normalize_condition_tensor(value, *, like_tensor=None, name="conditioning"):
+    if value is None:
+        return None
+    if not isinstance(value, Tensor):
+        raise TypeError(f"Expected '{name}' to be a torch.Tensor, got {type(value).__name__}.")
+
+    if like_tensor is not None:
+        if value.device != like_tensor.device:
+            value = value.to(device=like_tensor.device)
+        if value.dtype != like_tensor.dtype:
+            value = value.to(dtype=like_tensor.dtype)
+    return value
+
+
+def _infer_main_model_block_count(value, fallback):
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, (tuple, list)):
+        numeric_values = [item for item in value if isinstance(item, int) and item > 0]
+        if numeric_values:
+            return max(numeric_values)
+    return fallback
+
+
+def _infer_linear_input_features(module, fallback):
+    if module is None:
+        return fallback
+
+    direct_value = getattr(module, "in_features", None)
+    if isinstance(direct_value, int) and direct_value > 0:
+        return direct_value
+
+    for child in module.modules():
+        child_value = getattr(child, "in_features", None)
+        if isinstance(child_value, int) and child_value > 0:
+            return child_value
+
+    return fallback
+
+
+def _infer_patch_size(feature_width, base_channels, fallback=2):
+    if not isinstance(feature_width, int) or feature_width <= 0:
+        return fallback
+    if not isinstance(base_channels, int) or base_channels <= 0:
+        return fallback
+
+    patch_area = feature_width / base_channels
+    if patch_area <= 0:
+        return fallback
+
+    patch_size = int(round(math.sqrt(patch_area)))
+    if patch_size > 0 and (patch_size * patch_size * base_channels) == feature_width:
+        return patch_size
+    return fallback
+
+
+class InfuseNetFluxCompatibilityError(RuntimeError):
+    pass
+
 class InfuseNet(ControlNet):
     def __init__(self, 
                  control_model=None, 
@@ -64,10 +133,15 @@ class InfuseNet(ControlNet):
     
 class InfuseNetFlux(Flux):
     def __init__(self, latent_input=False, num_union_modes=0, mistoline=False, control_latent_channels=None, image_model=None, dtype=None, device=None, operations=None, **kwargs):
+        main_model_double = kwargs.pop("main_model_double", None)
+        main_model_single = kwargs.pop("main_model_single", None)
+        patch_size = kwargs.pop("patch_size", 2)
         super().__init__(final_layer=False, dtype=dtype, device=device, operations=operations, **kwargs)
 
-        self.main_model_double = 19
-        self.main_model_single = 38
+        self.main_model_double = _infer_main_model_block_count(main_model_double, 19)
+        self.main_model_single = _infer_main_model_block_count(main_model_single, 38)
+        self.patch_size = patch_size if isinstance(patch_size, int) and patch_size > 0 else 2
+        self.timestep_embedding_dim = _infer_linear_input_features(getattr(self, "time_in", None), 256)
 
         self.mistoline = mistoline
         # add ControlNet blocks
@@ -94,7 +168,7 @@ class InfuseNetFlux(Flux):
         if control_latent_channels is None:
             control_latent_channels = self.in_channels
         else:
-            control_latent_channels *= 2 * 2 #patch size
+            control_latent_channels *= self.patch_size * self.patch_size
 
         self.pos_embed_input = operations.Linear(control_latent_channels, self.hidden_size, bias=True, dtype=dtype, device=device)
         if not self.latent_input:
@@ -140,9 +214,9 @@ class InfuseNetFlux(Flux):
 
         controlnet_cond = self.pos_embed_input(controlnet_cond)
         img = img + controlnet_cond
-        vec = self.time_in(timestep_embedding(timesteps, 256))
+        vec = self.time_in(timestep_embedding(timesteps, self.timestep_embedding_dim))
         if self.params.guidance_embed:
-            vec = vec + self.guidance_in(timestep_embedding(guidance, 256))
+            vec = vec + self.guidance_in(timestep_embedding(guidance, self.timestep_embedding_dim))
         vec = vec + self.vector_in(y)
         txt = self.txt_in(txt)
 
@@ -194,8 +268,43 @@ class InfuseNetFlux(Flux):
             out["output"] = out_output[:self.main_model_single]
         return out
 
-    def forward(self, x, timesteps, context, y, guidance=None, hint=None, **kwargs):
-        patch_size = 2
+    def _resolve_extra_conditions(self, *, context, y=None, guidance=None, kwargs=None):
+        kwargs = kwargs or {}
+
+        resolved_y = _first_present(kwargs, "y", "pooled_output", "pooled_outputs", "vector", "vec")
+        if resolved_y is None:
+            resolved_y = y
+        resolved_y = _normalize_condition_tensor(resolved_y, like_tensor=context, name="y")
+
+        resolved_guidance = _first_present(kwargs, "guidance", "guidance_vec", "guidance_embedding")
+        if resolved_guidance is None:
+            resolved_guidance = guidance
+        resolved_guidance = _normalize_condition_tensor(resolved_guidance, like_tensor=context, name="guidance")
+
+        if resolved_y is None:
+            available_keys = ", ".join(sorted(kwargs.keys())) if len(kwargs) > 0 else "none"
+            raise InfuseNetFluxCompatibilityError(
+                "InfuseNet-FLUX expected pooled conditioning tensor 'y', but the active ComfyUI FLUX pipeline did not provide one. "
+                "This repository's InfiniteYou checkpoints target FLUX.1-style pooled conditioning. "
+                f"Available extra args: {available_keys}. "
+                "If you are using FLUX.2 dev or a custom text-encoder stack, make sure the workflow/model path still exposes FLUX pooled embeddings, "
+                "or use FLUX.1-compatible components for this checkpoint."
+            )
+
+        return resolved_y, resolved_guidance
+
+    def forward(self, x, timesteps, context, y=None, guidance=None, hint=None, **kwargs):
+        y, guidance = self._resolve_extra_conditions(context=context, y=y, guidance=guidance, kwargs=kwargs)
+        if hint is None:
+            raise InfuseNetFluxCompatibilityError(
+                "InfuseNet-FLUX expected a control hint tensor but none was provided. "
+                "Make sure the Apply InfuseNet node is connected to a control image before sampling."
+            )
+
+        if self.params.guidance_embed and guidance is None:
+            guidance = torch.zeros_like(timesteps)
+
+        patch_size = self.patch_size
         if self.latent_input:
             hint = comfy.ldm.common_dit.pad_to_patch_size(hint, (patch_size, patch_size))
         elif self.mistoline:
@@ -249,15 +358,31 @@ def load_infuse_net_flux(ckpt_path, model_options={}):
     if union_cnet in new_sd:
         num_union_modes = new_sd[union_cnet].shape[0]
 
-    control_latent_channels = new_sd.get("pos_embed_input.weight").shape[1] // 4
+    pos_embed_input_weight = new_sd.get("pos_embed_input.weight")
+    if pos_embed_input_weight is None:
+        raise InfuseNetFluxCompatibilityError(
+            "The selected InfiniteYou checkpoint is missing 'pos_embed_input.weight'. "
+            "This checkpoint does not match the expected FLUX InfuseNet ControlNet format."
+        )
+
+    inferred_unet_config = dict(model_config.unet_config)
+    base_latent_channels = inferred_unet_config.get("in_channels")
+    patch_size = _infer_patch_size(pos_embed_input_weight.shape[1], base_latent_channels, fallback=inferred_unet_config.get("patch_size", 2))
+    control_latent_channels = pos_embed_input_weight.shape[1] // (patch_size * patch_size)
     concat_mask = False
     if control_latent_channels == 17:
         concat_mask = True
 
-    control_model = InfuseNetFlux(latent_input=True, num_union_modes=num_union_modes, control_latent_channels=control_latent_channels, operations=operations, device=offload_device, dtype=unet_dtype, **model_config.unet_config)
+    inferred_unet_config.setdefault("main_model_double", getattr(model_config, "depth", None))
+    inferred_unet_config.setdefault("main_model_single", getattr(model_config, "depth_single_blocks", None))
+    inferred_unet_config["patch_size"] = patch_size
+
+    control_model = InfuseNetFlux(latent_input=True, num_union_modes=num_union_modes, control_latent_channels=control_latent_channels, operations=operations, device=offload_device, dtype=unet_dtype, **inferred_unet_config)
     control_model = controlnet_load_state_dict(control_model, new_sd)
 
     latent_format = comfy.latent_formats.Flux()
-    extra_conds = ['y', 'guidance']
+    extra_conds = ['y']
+    if getattr(control_model.params, "guidance_embed", False):
+        extra_conds.append('guidance')
     control = InfuseNet(control_model, compression_ratio=1, latent_format=latent_format, concat_mask=concat_mask, load_device=load_device, manual_cast_dtype=manual_cast_dtype, extra_conds=extra_conds)
     return control

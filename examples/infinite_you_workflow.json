@@ -50,7 +50,7 @@
     },
     {
       "id": 110,
-      "type": "ExtractIDEmbedding",
+      "type": "F2_ExtractIDEmbedding",
       "pos": [
         -565.7846069335938,
         778.5155639648438
@@ -94,7 +94,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "ExtractIDEmbedding"
+        "Node name for S&R": "F2_ExtractIDEmbedding"
       },
       "widgets_values": []
     },
@@ -175,7 +175,7 @@
     },
     {
       "id": 109,
-      "type": "InfuseNetApply",
+      "type": "F2_InfuseNetApply",
       "pos": [
         278.14422607421875,
         803.1834716796875
@@ -238,7 +238,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "InfuseNetApply"
+        "Node name for S&R": "F2_InfuseNetApply"
       },
       "widgets_values": [
         1,
@@ -322,7 +322,7 @@
     },
     {
       "id": 106,
-      "type": "ExtractFacePoseImage",
+      "type": "F2_ExtractFacePoseImage",
       "pos": [
         -125.12596130371094,
         1233.2313232421875
@@ -356,7 +356,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "ExtractFacePoseImage"
+        "Node name for S&R": "F2_ExtractFacePoseImage"
       },
       "widgets_values": [
         864,
@@ -543,7 +543,7 @@
     },
     {
       "id": 108,
-      "type": "InfuseNetLoader",
+      "type": "F2_InfuseNetLoader",
       "pos": [
         -128.15025329589844,
         920.6913452148438
@@ -567,7 +567,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "InfuseNetLoader"
+        "Node name for S&R": "F2_InfuseNetLoader"
       },
       "widgets_values": [
         "aes_stage2/infusenet_aes_fp8e4m3fn.safetensors"
@@ -656,7 +656,7 @@
     },
     {
       "id": 102,
-      "type": "IDEmbeddingModelLoader",
+      "type": "F2_IDEmbeddingModelLoader",
       "pos": [
         -999.3194580078125,
         746.9200439453125
@@ -699,7 +699,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "IDEmbeddingModelLoader"
+        "Node name for S&R": "F2_IDEmbeddingModelLoader"
       },
       "widgets_values": [
         "aes_stage2/image_proj_model.bin",

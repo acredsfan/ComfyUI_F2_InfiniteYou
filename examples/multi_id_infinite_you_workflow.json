@@ -339,7 +339,7 @@
     },
     {
       "id": 119,
-      "type": "ExtractFacePoseImage",
+      "type": "F2_ExtractFacePoseImage",
       "pos": [
         1716.77392578125,
         1481.45556640625
@@ -379,7 +379,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "ExtractFacePoseImage"
+        "Node name for S&R": "F2_ExtractFacePoseImage"
       },
       "widgets_values": [
         864,
@@ -388,7 +388,7 @@
     },
     {
       "id": 121,
-      "type": "ExtractIDEmbedding",
+      "type": "F2_ExtractIDEmbedding",
       "pos": [
         1324.1436767578125,
         1391.9034423828125
@@ -434,13 +434,13 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "ExtractIDEmbedding"
+        "Node name for S&R": "F2_ExtractIDEmbedding"
       },
       "widgets_values": []
     },
     {
       "id": 110,
-      "type": "ExtractIDEmbedding",
+      "type": "F2_ExtractIDEmbedding",
       "pos": [
         -742.9761962890625,
         1403.471435546875
@@ -486,7 +486,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "ExtractIDEmbedding"
+        "Node name for S&R": "F2_ExtractIDEmbedding"
       },
       "widgets_values": []
     },
@@ -526,7 +526,7 @@
     },
     {
       "id": 106,
-      "type": "ExtractFacePoseImage",
+      "type": "F2_ExtractFacePoseImage",
       "pos": [
         -142.10414123535156,
         1576.8348388671875
@@ -567,7 +567,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "ExtractFacePoseImage"
+        "Node name for S&R": "F2_ExtractFacePoseImage"
       },
       "widgets_values": [
         864,
@@ -576,7 +576,7 @@
     },
     {
       "id": 108,
-      "type": "InfuseNetLoader",
+      "type": "F2_InfuseNetLoader",
       "pos": [
         569.8663940429688,
         1030.9078369140625
@@ -601,7 +601,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "InfuseNetLoader"
+        "Node name for S&R": "F2_InfuseNetLoader"
       },
       "widgets_values": [
         "aes_stage2/infusenet_aes_fp8e4m3fn.safetensors"
@@ -609,7 +609,7 @@
     },
     {
       "id": 102,
-      "type": "IDEmbeddingModelLoader",
+      "type": "F2_IDEmbeddingModelLoader",
       "pos": [
         -869.2985229492188,
         977.8091430664062
@@ -656,7 +656,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "IDEmbeddingModelLoader"
+        "Node name for S&R": "F2_IDEmbeddingModelLoader"
       },
       "widgets_values": [
         "aes_stage2/image_proj_model.bin",
@@ -791,7 +791,7 @@
     },
     {
       "id": 163,
-      "type": "InfuseNetApply",
+      "type": "F2_InfuseNetApply",
       "pos": [
         136.95687866210938,
         1326.953369140625
@@ -858,7 +858,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "InfuseNetApply"
+        "Node name for S&R": "F2_InfuseNetApply"
       },
       "widgets_values": [
         1.0000000000000002,
@@ -868,7 +868,7 @@
     },
     {
       "id": 164,
-      "type": "InfuseNetApply",
+      "type": "F2_InfuseNetApply",
       "pos": [
         2013.8388671875,
         1340.6917724609375
@@ -935,7 +935,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "InfuseNetApply"
+        "Node name for S&R": "F2_InfuseNetApply"
       },
       "widgets_values": [
         1.0000000000000002,
