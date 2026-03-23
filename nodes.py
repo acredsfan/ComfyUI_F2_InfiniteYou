@@ -206,9 +206,6 @@ class ExtractIDEmbedding:
         id_embed = id_embed.to(device=device, dtype=torch.bfloat16)
         with torch.no_grad():
             id_embed = image_proj_model(id_embed)
-            bs_embed, seq_len, _ = id_embed.shape
-            id_embed = id_embed.repeat(1, 1, 1)
-            id_embed = id_embed.view(bs_embed * 1, seq_len, -1)
             id_embed = id_embed.to(device=device, dtype=torch.bfloat16)
             
         return ({'id_embedding': id_embed}, )

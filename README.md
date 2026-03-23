@@ -72,7 +72,9 @@ The full-performance BF16 model inference requires a peak VRAM of around **43GB*
 - Note that the InfiniteYou model weights were trained on FLUX.1, so identity fidelity is highest when using FLUX.1-compatible text encoders and VAE combinations. When used with FLUX.2 models that share the same hidden-width layout (context dim 4096, pooled dim 768), results should be equivalent to FLUX.1.
 - Patch layout, timestep embedding dimensions, and double/single block counts are all derived directly from the loaded checkpoint, ensuring compatibility across FLUX-family variants.
 - If a FLUX.2 setup uses different text-conditioning or model hidden dimensions, the node will stop early with a clear dimension-mismatch error instead of failing deep in sampling.
-- The `guidance` (distillation) embedding is handled automatically: if present in the pipeline it is forwarded to the control model; if absent a zero tensor is used as a safe fallback.
+- The `guidance` (distillation) embedding is handled automatically and robustly: if provided as a Python scalar (as ComfyUI stores it internally), a 0-dim tensor, or a single-element tensor it is normalised and broadcast to the correct batch size before being forwarded to the control model. If absent, a zero tensor is used as a safe fallback.
+- The pooled embedding `y` is similarly batch-normalised at runtime, so CFG sampling (which doubles the batch size) cannot produce a shape mismatch even when the zero-fallback path is taken.
+- `comfy.sampler_helpers` is explicitly imported, ensuring the masked-region control path works reliably regardless of ComfyUI module load order.
 
 ### Coexistence with ComfyUI_InfiniteYou
 
