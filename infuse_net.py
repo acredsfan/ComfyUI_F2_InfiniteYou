@@ -282,14 +282,24 @@ class InfuseNetFlux(Flux):
         resolved_guidance = _normalize_condition_tensor(resolved_guidance, like_tensor=context, name="guidance")
 
         if resolved_y is None:
-            available_keys = ", ".join(sorted(kwargs.keys())) if len(kwargs) > 0 else "none"
-            raise InfuseNetFluxCompatibilityError(
-                "InfuseNet-FLUX expected pooled conditioning tensor 'y', but the active ComfyUI FLUX pipeline did not provide one. "
-                "This repository's InfiniteYou checkpoints target FLUX.1-style pooled conditioning. "
-                f"Available extra args: {available_keys}. "
-                "If you are using FLUX.2 dev or a custom text-encoder stack, make sure the workflow/model path still exposes FLUX pooled embeddings, "
-                "or use FLUX.1-compatible components for this checkpoint."
-            )
+            # Graceful fallback for FLUX.2 dev or any pipeline that does not expose a
+            # CLIP-style pooled embedding: derive the expected vector dimension from the
+            # model's vector_in projection and substitute a zero tensor so that sampling
+            # continues without error.  Quality may be lower than with proper pooled
+            # conditioning, but the workflow will not hard-crash.
+            vec_in_mod = getattr(self, "vector_in", None)
+            in_dim = _infer_linear_input_features(vec_in_mod, None)
+            if in_dim is not None:
+                resolved_y = context.new_zeros(context.shape[0], in_dim)
+            else:
+                available_keys = ", ".join(sorted(kwargs.keys())) if len(kwargs) > 0 else "none"
+                raise InfuseNetFluxCompatibilityError(
+                    "InfuseNet-FLUX expected pooled conditioning tensor 'y', but the active ComfyUI FLUX pipeline did not provide one "
+                    "and the expected pooled-vector dimension could not be inferred from the loaded checkpoint. "
+                    "This repository's InfiniteYou checkpoints target FLUX.1-style pooled conditioning. "
+                    f"Available extra args: {available_keys}. "
+                    "If you are using FLUX.2 dev or a custom text-encoder stack, make sure the workflow/model path still exposes FLUX pooled embeddings."
+                )
 
         return resolved_y, resolved_guidance
 
@@ -344,6 +354,15 @@ class InfuseNetFlux(Flux):
         img_ids = repeat(img_ids, "h w c -> b (h w) c", b=bs)
 
         txt_ids = torch.zeros((bs, context.shape[1], 3), device=x.device, dtype=x.dtype)
+        # Expand context (id_embedding) to match the image batch size.  When
+        # CFG > 1 the sampler passes a double-batched x (positive + negative
+        # concatenated), so context must be tiled to the same batch size or the
+        # double blocks will receive mismatched tensors and raise a shape error.
+        if context.shape[0] < bs:
+            if context.shape[0] == 1:
+                context = context.expand(bs, -1, -1)
+            else:
+                context = context.repeat(bs // context.shape[0], 1, 1)
         return self.forward_orig(img, img_ids, hint, context, txt_ids, timesteps, y, guidance, control_type=kwargs.get("control_type", []), out_mask=out_mask)
 
 def load_infuse_net_flux(ckpt_path, model_options={}):

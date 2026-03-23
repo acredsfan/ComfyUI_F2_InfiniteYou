@@ -27,7 +27,7 @@ from facexlib.recognition import init_recognition_model
 from insightface.app import FaceAnalysis
 
 from .utils import extract_arcface_bgr_embedding, tensor_to_np_image, np_image_to_tensor, resize_and_pad_pil_image, draw_kps, escape_path_for_url
-from .infuse_net import load_infuse_net_flux
+from .infuse_net import load_infuse_net_flux, _infer_linear_input_features
 from .resampler import Resampler
 
 MODEL_KEY = "f2_infinite_you"
@@ -275,23 +275,30 @@ class InfuseNetApply:
 
     def _validate_flux_compatibility(self, conditioning, id_embedding, control_net):
         control_model = getattr(control_net, "control_model", None)
-        expected_hidden_size = getattr(control_model, "hidden_size", None)
-        actual_hidden_size = id_embedding.shape[-1]
+        # The id_embedding last dimension must match the InfuseNet txt_in input
+        # features (i.e. context_in_dim, typically 4096 for FLUX.1 / T5-XXL).
+        # Using hidden_size (3072) was incorrect because the txt_in Linear maps
+        # context_in_dim → hidden_size; the id_embedding flows through txt_in,
+        # not as a hidden-size tensor.
+        txt_in = getattr(control_model, "txt_in", None)
+        expected_context_dim = _infer_linear_input_features(txt_in, None) if txt_in is not None else None
+        actual_context_dim = id_embedding.shape[-1]
 
-        if isinstance(expected_hidden_size, int) and expected_hidden_size > 0 and actual_hidden_size != expected_hidden_size:
+        if isinstance(expected_context_dim, int) and expected_context_dim > 0 and actual_context_dim != expected_context_dim:
             raise ValueError(
-                f"The selected InfiniteYou image projection output width ({actual_hidden_size}) does not match the loaded InfuseNet hidden size ({expected_hidden_size}). "
-                "This usually means the checkpoint and projection model target different FLUX architectures. "
-                "The released InfiniteYou image projection weights are FLUX.1-oriented and may not be compatible with FLUX.2 models that use a different hidden size."
+                f"The selected InfiniteYou image projection output width ({actual_context_dim}) does not match the loaded InfuseNet context input width ({expected_context_dim}). "
+                "This usually means the image projection model and InfuseNet checkpoint target different context dimensions. "
+                "The released InfiniteYou image projection weights output 4096-dim embeddings, matching the FLUX.1 InfuseNet text input. "
+                "If you are using FLUX.2 dev with a text encoder that outputs a different context width, make sure all components share compatible dimensions."
             )
 
         if conditioning is None or len(conditioning) == 0:
             return
 
         first_cond = conditioning[0][0]
-        if isinstance(first_cond, torch.Tensor) and first_cond.ndim >= 3 and first_cond.shape[-1] != actual_hidden_size:
+        if isinstance(first_cond, torch.Tensor) and first_cond.ndim >= 3 and first_cond.shape[-1] != actual_context_dim:
             raise ValueError(
-                f"The conditioning width ({first_cond.shape[-1]}) does not match the InfiniteYou projection width ({actual_hidden_size}). "
+                f"The conditioning width ({first_cond.shape[-1]}) does not match the InfiniteYou projection width ({actual_context_dim}). "
                 "This workflow is mixing incompatible text-encoder / diffusion-model dimensions for the selected InfiniteYou checkpoint."
             )
 
