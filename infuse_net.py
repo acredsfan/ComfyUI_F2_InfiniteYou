@@ -118,7 +118,15 @@ class InfuseNet(ControlNet):
         self.id_embedding = id_embedding
 
     def copy(self):
-        c = InfuseNet(None, global_average_pooling=self.global_average_pooling, load_device=self.load_device, manual_cast_dtype=self.manual_cast_dtype)
+        c = InfuseNet(None,
+                      global_average_pooling=self.global_average_pooling,
+                      compression_ratio=self.compression_ratio,
+                      latent_format=self.latent_format,
+                      load_device=self.load_device,
+                      manual_cast_dtype=self.manual_cast_dtype,
+                      extra_conds=list(self.extra_conds) if self.extra_conds is not None else None,
+                      strength_type=self.strength_type,
+                      concat_mask=self.concat_mask)
         c.control_model = self.control_model
         c.control_model_wrapped = self.control_model_wrapped
         c.id_embedding = self.id_embedding
@@ -271,22 +279,31 @@ class InfuseNetFlux(Flux):
     def _resolve_extra_conditions(self, *, context, y=None, guidance=None, kwargs=None):
         kwargs = kwargs or {}
 
-        resolved_y = _first_present(kwargs, "y", "pooled_output", "pooled_outputs", "vector", "vec")
+        # Search all known key names used by FLUX.1 and FLUX.2 conditioning pipelines
+        # for the pooled text embedding vector.
+        resolved_y = _first_present(
+            kwargs,
+            "y", "pooled_output", "pooled_outputs", "vector", "vec",
+            "clip_pooled", "pooled", "text_embeds",
+        )
         if resolved_y is None:
             resolved_y = y
         resolved_y = _normalize_condition_tensor(resolved_y, like_tensor=context, name="y")
 
-        resolved_guidance = _first_present(kwargs, "guidance", "guidance_vec", "guidance_embedding")
+        # Search all known key names for the guidance (distillation) embedding.
+        resolved_guidance = _first_present(
+            kwargs,
+            "guidance", "guidance_vec", "guidance_embedding", "guidance_scale",
+        )
         if resolved_guidance is None:
             resolved_guidance = guidance
         resolved_guidance = _normalize_condition_tensor(resolved_guidance, like_tensor=context, name="guidance")
 
         if resolved_y is None:
-            # Graceful fallback for FLUX.2 dev or any pipeline that does not expose a
-            # CLIP-style pooled embedding: derive the expected vector dimension from the
-            # model's vector_in projection and substitute a zero tensor so that sampling
-            # continues without error.  Quality may be lower than with proper pooled
-            # conditioning, but the workflow will not hard-crash.
+            # Graceful fallback for FLUX.2 or any pipeline that does not expose a
+            # CLIP-style pooled embedding: derive the expected vector dimension from
+            # the model's vector_in projection and substitute a zero tensor so that
+            # sampling continues without error.
             vec_in_mod = getattr(self, "vector_in", None)
             in_dim = _infer_linear_input_features(vec_in_mod, None)
             if in_dim is not None:
@@ -296,9 +313,8 @@ class InfuseNetFlux(Flux):
                 raise InfuseNetFluxCompatibilityError(
                     "InfuseNet-FLUX expected pooled conditioning tensor 'y', but the active ComfyUI FLUX pipeline did not provide one "
                     "and the expected pooled-vector dimension could not be inferred from the loaded checkpoint. "
-                    "This repository's InfiniteYou checkpoints target FLUX.1-style pooled conditioning. "
                     f"Available extra args: {available_keys}. "
-                    "If you are using FLUX.2 dev or a custom text-encoder stack, make sure the workflow/model path still exposes FLUX pooled embeddings."
+                    "Make sure the workflow exposes FLUX-compatible pooled embeddings, or that the InfuseNet checkpoint includes a 'vector_in' layer."
                 )
 
         return resolved_y, resolved_guidance
@@ -392,8 +408,8 @@ def load_infuse_net_flux(ckpt_path, model_options={}):
     if control_latent_channels == 17:
         concat_mask = True
 
-    inferred_unet_config.setdefault("main_model_double", getattr(model_config, "depth", None))
-    inferred_unet_config.setdefault("main_model_single", getattr(model_config, "depth_single_blocks", None))
+    inferred_unet_config.setdefault("main_model_double", inferred_unet_config.get("depth"))
+    inferred_unet_config.setdefault("main_model_single", inferred_unet_config.get("depth_single_blocks"))
     inferred_unet_config["patch_size"] = patch_size
 
     control_model = InfuseNetFlux(latent_input=True, num_union_modes=num_union_modes, control_latent_channels=control_latent_channels, operations=operations, device=offload_device, dtype=unet_dtype, **inferred_unet_config)

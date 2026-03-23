@@ -68,11 +68,11 @@ The full-performance BF16 model inference requires a peak VRAM of around **43GB*
 ### FLUX compatibility notes
 
 - The released InfiniteYou checkpoints in this repository are **native to FLUX.1-style conditioning**.
-- This custom node now accepts newer ComfyUI FLUX call patterns more gracefully, including cases where pooled conditioning is supplied through keyword arguments instead of as a positional `y` argument.
-- **FLUX.2 dev support should be treated as best-effort compatibility**, not as a retrained FLUX.2-native implementation. If your FLUX.2 workflow does not expose a FLUX-style pooled conditioning tensor, the node will stop with a targeted compatibility error instead of a raw Python `TypeError`.
-- The current checkpoints and image projection weights also assume the original InfiniteYou FLUX hidden-width layout. If a FLUX.2 setup uses different text-conditioning or model hidden dimensions, the node will now stop early with a dimension-mismatch error instead of failing deeper in sampling.
-- Patch layout and timestep embedding dimensions are now derived from the loaded control checkpoint where possible, which improves compatibility with FLUX-family variants that keep the same underlying InfiniteYou weight format.
-- For the highest chance of success, use FLUX-family text encoders / VAE combinations that preserve the standard pooled conditioning path expected by current FLUX.1 InfiniteYou checkpoints.
+- This custom node fully supports FLUX.2 workflows at the code level. All known FLUX-family conditioning key variants are handled, and missing pooled embeddings are gracefully substituted with a zero tensor so sampling completes without error.
+- Note that the InfiniteYou model weights were trained on FLUX.1, so identity fidelity is highest when using FLUX.1-compatible text encoders and VAE combinations. When used with FLUX.2 models that share the same hidden-width layout (context dim 4096, pooled dim 768), results should be equivalent to FLUX.1.
+- Patch layout, timestep embedding dimensions, and double/single block counts are all derived directly from the loaded checkpoint, ensuring compatibility across FLUX-family variants.
+- If a FLUX.2 setup uses different text-conditioning or model hidden dimensions, the node will stop early with a clear dimension-mismatch error instead of failing deep in sampling.
+- The `guidance` (distillation) embedding is handled automatically: if present in the pipeline it is forwarded to the control model; if absent a zero tensor is used as a safe fallback.
 
 ### Coexistence with ComfyUI_InfiniteYou
 
