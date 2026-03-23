@@ -22,6 +22,7 @@ from comfy.controlnet import controlnet_config, controlnet_load_state_dict, Cont
 from comfy.ldm.flux.model import Flux
 from comfy.ldm.flux.layers import (timestep_embedding)
 import comfy.ldm.common_dit
+import comfy.sampler_helpers
 
 
 def _first_present(mapping, *keys):
@@ -36,6 +37,11 @@ def _first_present(mapping, *keys):
 def _normalize_condition_tensor(value, *, like_tensor=None, name="conditioning"):
     if value is None:
         return None
+    if isinstance(value, (int, float)):
+        # ComfyUI may store scalar conditioning values (e.g. guidance scale) as
+        # plain Python numbers in the conditioning dict.  Convert to a 0-dim
+        # tensor here; the caller is responsible for broadcasting to batch size.
+        value = torch.tensor(float(value))
     if not isinstance(value, Tensor):
         raise TypeError(f"Expected '{name}' to be a torch.Tensor, got {type(value).__name__}.")
 
@@ -327,9 +333,6 @@ class InfuseNetFlux(Flux):
                 "Make sure the Apply InfuseNet node is connected to a control image before sampling."
             )
 
-        if self.params.guidance_embed and guidance is None:
-            guidance = torch.zeros_like(timesteps)
-
         patch_size = self.patch_size
         if self.latent_input:
             hint = comfy.ldm.common_dit.pad_to_patch_size(hint, (patch_size, patch_size))
@@ -346,6 +349,35 @@ class InfuseNetFlux(Flux):
         x = comfy.ldm.common_dit.pad_to_patch_size(x, (patch_size, patch_size))
 
         img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch_size, pw=patch_size)
+
+        # ── Expand / normalise guidance to match the real batch size ──────────
+        # guidance can arrive as:
+        #   • None           – ComfyUI pipeline did not supply it
+        #   • 0-dim tensor   – came in as a Python scalar that was converted by
+        #                      _normalize_condition_tensor
+        #   • (1,) tensor    – single-element, needs tiling for CFG
+        #   • (bs,) tensor   – already correct
+        if guidance is not None:
+            if guidance.dim() == 0:
+                guidance = guidance.unsqueeze(0)
+            if guidance.shape[0] != bs:
+                if guidance.shape[0] == 1:
+                    guidance = guidance.expand(bs)
+                else:
+                    repeats = math.ceil(bs / guidance.shape[0])
+                    guidance = guidance.repeat(repeats)[:bs]
+        elif self.params.guidance_embed:
+            guidance = timesteps.new_zeros(bs)
+
+        # ── Expand y (pooled embedding) to match the real batch size ──────────
+        # The zero-fallback in _resolve_extra_conditions is built with
+        # context.shape[0] (id-embedding batch = 1) while bs may be 2 under CFG.
+        if y is not None and y.shape[0] != bs:
+            if y.shape[0] == 1:
+                y = y.expand(bs, -1)
+            else:
+                repeats = math.ceil(bs / y.shape[0])
+                y = y.repeat(repeats, 1)[:bs]
 
         control_mask = kwargs.get("control_mask", None)
         out_mask = None
@@ -374,11 +406,14 @@ class InfuseNetFlux(Flux):
         # CFG > 1 the sampler passes a double-batched x (positive + negative
         # concatenated), so context must be tiled to the same batch size or the
         # double blocks will receive mismatched tensors and raise a shape error.
-        if context.shape[0] < bs:
+        if context.shape[0] != bs:
             if context.shape[0] == 1:
                 context = context.expand(bs, -1, -1)
+            elif context.shape[0] < bs:
+                repeats = math.ceil(bs / context.shape[0])
+                context = context.repeat(repeats, 1, 1)[:bs]
             else:
-                context = context.repeat(bs // context.shape[0], 1, 1)
+                context = context[:bs]
         return self.forward_orig(img, img_ids, hint, context, txt_ids, timesteps, y, guidance, control_type=kwargs.get("control_type", []), out_mask=out_mask)
 
 def load_infuse_net_flux(ckpt_path, model_options={}):
