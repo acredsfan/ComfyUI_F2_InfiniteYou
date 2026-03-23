@@ -24,7 +24,8 @@ def extract_arcface_bgr_embedding(in_image, landmark, arcface_model, in_settings
     arc_face_image = face_align.norm_crop(in_image, landmark=np.array(kps), image_size=112)
     arc_face_image = torch.from_numpy(arc_face_image).unsqueeze(0).permute(0,3,1,2) / 255.
     arc_face_image = 2 * arc_face_image - 1
-    arc_face_image = arc_face_image.cuda().contiguous()
+    device = next(arcface_model.parameters()).device
+    arc_face_image = arc_face_image.to(device).contiguous()
     face_emb = arcface_model(arc_face_image)[0] # [512], normalized
     return face_emb
 
