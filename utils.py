@@ -30,6 +30,10 @@ def extract_arcface_bgr_embedding(in_image, landmark, arcface_model, in_settings
     return face_emb
 
 def tensor_to_np_image(tensor):
+    if tensor is None:
+        raise ValueError(
+            "tensor_to_np_image received None; ensure the image input is properly connected."
+        )
     return tensor.mul(255).clamp(0, 255).byte().cpu().numpy()
 
 def np_image_to_tensor(image):
