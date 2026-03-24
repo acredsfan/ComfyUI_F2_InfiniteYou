@@ -150,7 +150,7 @@ class InfuseNetFlux(Flux):
         main_model_double = kwargs.pop("main_model_double", None)
         main_model_single = kwargs.pop("main_model_single", None)
         patch_size = kwargs.pop("patch_size", 2)
-        super().__init__(final_layer=False, dtype=dtype, device=device, operations=operations, **kwargs)
+        super().__init__(final_layer=False, dtype=dtype, device=device, operations=operations, patch_size=patch_size, **kwargs)
 
         self.main_model_double = _infer_main_model_block_count(main_model_double, 19)
         self.main_model_single = _infer_main_model_block_count(main_model_single, 38)
