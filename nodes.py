@@ -182,11 +182,12 @@ class ExtractFacePoseImage:
     def extract_face_pose(self, face_detector, image, width, height, mask = None):
         np_image = tensor_to_np_image(image)[0]
         if mask is not None:
-            np_mask = tensor_to_np_image(mask)[0]
+            # Use the float mask values (0.0–1.0) directly to avoid uint8
+            # overflow that would occur if we multiplied two 0-255 uint8 arrays.
+            np_mask = mask[0].cpu().float().numpy()
             np_mask = cv2.resize(np_mask, (np_image.shape[1], np_image.shape[0]), interpolation=cv2.INTER_NEAREST)
-            mask_3ch = np.expand_dims(np_mask, axis=-1)
-            mask_3ch = np.repeat(mask_3ch, 3, axis=-1)  # Shape: (H, W, 3)
-            np_image = np_image * mask_3ch
+            # Broadcast mask over channels; round to minimise truncation artefacts.
+            np_image = np.clip(np.round(np_image.astype(np.float32) * np_mask[..., np.newaxis]), 0, 255).astype(np.uint8)
 
         pil_image = resize_and_pad_pil_image(Image.fromarray(np_image), (width, height))        
         face_info = face_detector(cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR))
