@@ -21,7 +21,6 @@ from PIL import Image
 import comfy
 from huggingface_hub import snapshot_download, hf_hub_download
 import shutil
-import glob
 
 from facexlib.recognition import init_recognition_model
 from insightface.app import FaceAnalysis
@@ -34,6 +33,26 @@ MODEL_KEY = "f2_infinite_you"
 MODEL_DIR = os.path.join(folder_paths.models_dir, "infinite_you")
 
 folder_paths.add_model_folder_path(MODEL_KEY, MODEL_DIR)
+
+# The five ONNX files that make up the antelopev2 face-analysis pack.
+_ANTELOPEV2_REQUIRED_FILES = [
+    "1k3d68.onnx",
+    "2d106det.onnx",
+    "genderage.onnx",
+    "glintr100.onnx",
+    "scrfd_10g_bnkps.onnx",
+]
+
+# Minimum byte size we accept as a "real" ONNX binary.
+# Rejects empty files, Git-LFS pointer stubs (~130 B), and HTML error pages.
+_MIN_ONNX_SIZE_BYTES = 4096
+
+
+def _is_valid_onnx_file(path: str) -> bool:
+    """Return True if *path* is a regular file large enough to be a real ONNX model."""
+    if not os.path.isfile(path):
+        return False
+    return os.path.getsize(path) >= _MIN_ONNX_SIZE_BYTES
 
 class FaceDetector:
     def __init__(self, 
@@ -82,10 +101,16 @@ class IDEmbeddingModelLoader:
     def load_insightface(self, image_proj_model_name, image_proj_num_tokens, face_analysis_provider, face_analysis_det_size):
         insight_facedir = os.path.join(folder_paths.models_dir, "insightface")
 
-        # Download insightface models
+        # Download insightface models, re-downloading any that are missing or
+        # corrupt (e.g. partial downloads, Git-LFS pointer stubs, HTML error
+        # pages – all of which cause InvalidProtobuf at ONNX load time).
         antelopev2_dir = os.path.join(insight_facedir, 'models', 'antelopev2')
-        if not os.path.exists(antelopev2_dir) or len(glob.glob(os.path.join(antelopev2_dir, "*.onnx"))) == 0:
-            os.makedirs(antelopev2_dir, exist_ok=True)
+        os.makedirs(antelopev2_dir, exist_ok=True)
+        if not all(_is_valid_onnx_file(os.path.join(antelopev2_dir, f)) for f in _ANTELOPEV2_REQUIRED_FILES):
+            for f in _ANTELOPEV2_REQUIRED_FILES:
+                fp = os.path.join(antelopev2_dir, f)
+                if os.path.isfile(fp):
+                    os.remove(fp)
             snapshot_download(repo_id="MonsterMMORPG/tools", allow_patterns="*.onnx", local_dir=antelopev2_dir)
 
         # Download infinite you models
