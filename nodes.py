@@ -315,6 +315,22 @@ class InfuseNetApply:
                 "If you are using FLUX.2 dev with a text encoder that outputs a different context width, make sure all components share compatible dimensions."
             )
 
+        img_in = getattr(control_model, "img_in", None)
+        expected_latent_width = _infer_linear_input_features(img_in, None) if img_in is not None else None
+        pos_embed_input = getattr(control_model, "pos_embed_input", None)
+        hint_width = _infer_linear_input_features(pos_embed_input, None) if pos_embed_input is not None else None
+        if (
+            isinstance(expected_latent_width, int)
+            and expected_latent_width > 0
+            and isinstance(hint_width, int)
+            and hint_width > 0
+            and expected_latent_width != hint_width
+        ):
+            raise ValueError(
+                f"The loaded InfuseNet checkpoint is internally inconsistent: img_in expects latent width {expected_latent_width} but pos_embed_input expects {hint_width}. "
+                "This checkpoint is not compatible with the active FLUX patch/token layout. Please re-download or select a matching checkpoint."
+            )
+
         if conditioning is None or len(conditioning) == 0:
             return
 

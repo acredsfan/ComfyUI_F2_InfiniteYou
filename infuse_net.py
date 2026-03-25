@@ -95,6 +95,22 @@ def _infer_patch_size(feature_width, base_channels, fallback=2):
     return fallback
 
 
+def _infer_linear_weight_shape(module):
+    if module is None:
+        return None, None
+
+    weight = getattr(module, "weight", None)
+    if isinstance(weight, Tensor) and weight.ndim == 2:
+        return int(weight.shape[1]), int(weight.shape[0])
+
+    for child in module.modules():
+        child_weight = getattr(child, "weight", None)
+        if isinstance(child_weight, Tensor) and child_weight.ndim == 2:
+            return int(child_weight.shape[1]), int(child_weight.shape[0])
+
+    return None, None
+
+
 class InfuseNetFluxCompatibilityError(RuntimeError):
     pass
 
@@ -222,6 +238,17 @@ class InfuseNetFlux(Flux):
     ) -> Tensor:
         if img.ndim != 3 or txt.ndim != 3:
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
+
+        expected_img_in = _infer_linear_input_features(getattr(self, "img_in", None), None)
+        if not (isinstance(expected_img_in, int) and expected_img_in > 0):
+            expected_img_in, _ = _infer_linear_weight_shape(getattr(self, "img_in", None))
+
+        if isinstance(expected_img_in, int) and expected_img_in > 0 and img.shape[-1] != expected_img_in:
+            raise InfuseNetFluxCompatibilityError(
+                f"InfuseNet received latent token width {img.shape[-1]}, but the loaded checkpoint expects {expected_img_in} for 'img_in'. "
+                "This usually means the FLUX model and InfiniteYou InfuseNet checkpoint are incompatible (different latent width / patch-size configuration). "
+                "Use a matching InfuseNet checkpoint for the selected FLUX model family."
+            )
 
         # running on sequences img
         img = self.img_in(img)
