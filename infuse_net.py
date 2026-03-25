@@ -247,7 +247,8 @@ class InfuseNetFlux(Flux):
             raise InfuseNetFluxCompatibilityError(
                 f"InfuseNet received latent token width {img.shape[-1]}, but the loaded checkpoint expects {expected_img_in} for 'img_in'. "
                 "This usually means the FLUX model and InfiniteYou InfuseNet checkpoint are incompatible (different latent width / patch-size configuration). "
-                "Use a matching InfuseNet checkpoint for the selected FLUX model family."
+                "The official InfiniteYou auto-downloaded weights in this node pack are FLUX.1-dev models and cannot be used directly with a FLUX.2 latent layout. "
+                "Use a matching FLUX.1 workflow with the official InfiniteYou weights, or switch to FLUX.2-native alternatives for identity, style, and pose control."
             )
 
         # running on sequences img

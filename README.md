@@ -68,6 +68,7 @@ The full-performance BF16 model inference requires a peak VRAM of around **43GB*
 ### FLUX compatibility notes
 
 - The released InfiniteYou checkpoints in this repository are **native to FLUX.1-style conditioning**.
+- The auto-downloaded `image_proj_model.bin` and `infusenet_*.safetensors` files currently come from the official InfiniteYou `infu_flux_v1.0` release, which is a **FLUX.1-dev model release**.
 - This custom node fully supports FLUX.2 workflows at the code level. All known FLUX-family conditioning key variants are handled, and missing pooled embeddings are gracefully substituted with a zero tensor so sampling completes without error.
 - Note that the InfiniteYou model weights were trained on FLUX.1, so identity fidelity is highest when using FLUX.1-compatible text encoders and VAE combinations. When used with FLUX.2 models that share the same hidden-width layout (context dim 4096, pooled dim 768), results should be equivalent to FLUX.1.
 - Patch layout, timestep embedding dimensions, and double/single block counts are all derived directly from the loaded checkpoint, ensuring compatibility across FLUX-family variants.
@@ -75,6 +76,26 @@ The full-performance BF16 model inference requires a peak VRAM of around **43GB*
 - The `guidance` (distillation) embedding is handled automatically and robustly: if provided as a Python scalar (as ComfyUI stores it internally), a 0-dim tensor, or a single-element tensor it is normalised and broadcast to the correct batch size before being forwarded to the control model. If absent, a zero tensor is used as a safe fallback.
 - The pooled embedding `y` is similarly batch-normalised at runtime, so CFG sampling (which doubles the batch size) cannot produce a shape mismatch even when the zero-fallback path is taken.
 - `comfy.sampler_helpers` is explicitly imported, ensuring the masked-region control path works reliably regardless of ComfyUI module load order.
+
+### Recommended replacements for FLUX.2-native workflows
+
+If you are running a FLUX.2 workflow and hit a latent-width mismatch against the official InfiniteYou weights, that means the released InfiniteYou FLUX.1 checkpoint family does not match your active FLUX.2 base model. In that case, use FLUX.2-native alternatives instead of the official InfiniteYou auto-downloads:
+
+- **Identity consistency:** use a **PuLID-FLUX** workflow.
+- **Style consistency:** use a **FLUX IP-Adapter** style-reference workflow.
+- **Pose replication:** use a **FLUX pose ControlNet / OpenPose-compatible control** workflow.
+
+These are different model families from InfiniteYou, so they are not drop-in replacements inside the `F2_InfuseNet*` nodes. This node pack now surfaces a clear error when a FLUX.1 InfiniteYou checkpoint is paired with an incompatible FLUX.2 latent layout.
+
+### FLUX.2 helper nodes
+
+This pack also provides lightweight FLUX.2-specific helper nodes that prepare reference inputs for native FLUX.2 editing workflows:
+
+- `F2 FLUX.2 Identity Reference` validates that the input image contains a detectable face and forwards the original image as an identity reference.
+- `F2 FLUX.2 Style Reference` packages an image and style-strength value for style-reference workflows.
+- `F2 FLUX.2 Pose Reference` extracts the existing InfiniteYou facial pose overlay and returns it as a pose-reference image.
+
+These nodes do **not** convert InfiniteYou into a FLUX.2-native conditioning model. Instead, they help assemble FLUX.2 workflows that rely on the base model's native single-reference and multi-reference editing capabilities while reusing this pack's automatic InsightFace download path.
 
 ### Coexistence with ComfyUI_InfiniteYou
 

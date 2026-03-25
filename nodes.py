@@ -32,6 +32,24 @@ from .resampler import Resampler
 MODEL_KEY = "f2_infinite_you"
 MODEL_DIR = os.path.join(folder_paths.models_dir, "infinite_you")
 
+RECOMMENDED_FLUX2_ALTERNATIVES = {
+    "identity": {
+        "name": "PuLID-FLUX",
+        "purpose": "identity consistency",
+        "notes": "Recommended when you need a FLUX-family identity-preserving workflow instead of the official FLUX.1-only InfiniteYou weights.",
+    },
+    "style": {
+        "name": "FLUX IP-Adapter",
+        "purpose": "style consistency",
+        "notes": "Recommended when you want reference-image style transfer on top of a FLUX workflow.",
+    },
+    "pose": {
+        "name": "FLUX pose ControlNet / OpenPose-compatible control",
+        "purpose": "pose replication",
+        "notes": "Recommended when you need body or head-pose guidance with a FLUX workflow.",
+    },
+}
+
 folder_paths.add_model_folder_path(MODEL_KEY, MODEL_DIR)
 
 # The five ONNX files that make up the antelopev2 face-analysis pack.
@@ -74,7 +92,7 @@ class FaceDetector:
 
 class IDEmbeddingModelLoader:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "image_proj_model_name": (IDEmbeddingModelLoader.get_image_proj_names(), ),
@@ -90,6 +108,7 @@ class IDEmbeddingModelLoader:
     FUNCTION = "load_insightface"
     CATEGORY = "f2_infinite_you"
 
+    @staticmethod
     def get_image_proj_names():
         names = [
             os.path.join("sim_stage1", "image_proj_model.bin"),
@@ -162,7 +181,7 @@ class IDEmbeddingModelLoader:
 
 class ExtractFacePoseImage:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "face_detector": ("MODEL", ),
@@ -201,7 +220,7 @@ class ExtractFacePoseImage:
 
 class ExtractIDEmbedding:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {
             "required": {
                 "face_detector": ("MODEL", ),
@@ -236,11 +255,94 @@ class ExtractIDEmbedding:
             
         return ({'id_embedding': id_embed}, )
 
+
+class Flux2IdentityReference:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "face_detector": ("MODEL", ),
+                "arcface_model": ("MODEL", ),
+                "image": ("IMAGE", ),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("reference_image", "reference_notes")
+    FUNCTION = "build_reference"
+    CATEGORY = "f2_infinite_you"
+
+    def build_reference(self, face_detector, arcface_model, image):
+        np_image = tensor_to_np_image(image)
+        id_image_cv2 = cv2.cvtColor(np_image[0], cv2.COLOR_RGB2BGR)
+        face_info = face_detector(id_image_cv2)
+        if len(face_info) == 0:
+            raise ValueError("No face detected in the input ID image for the FLUX.2 identity reference.")
+
+        face_info = sorted(face_info, key=lambda x:(x['bbox'][2]-x['bbox'][0])*(x['bbox'][3]-x['bbox'][1]))[-1]
+        _ = extract_arcface_bgr_embedding(id_image_cv2, face_info['kps'], arcface_model)
+        return (
+            image,
+            "Use this image as a FLUX.2 identity reference input. FLUX.2 natively supports single- and multi-reference editing, so this node validates face detectability and forwards the original image.",
+        )
+
+
+class Flux2StyleReference:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE", ),
+                "style_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING", "FLOAT")
+    RETURN_NAMES = ("reference_image", "reference_notes", "style_strength")
+    FUNCTION = "build_reference"
+    CATEGORY = "f2_infinite_you"
+
+    def build_reference(self, image, style_strength):
+        return (
+            image,
+            "Use this image as a FLUX.2 style reference input for native reference editing or alongside a FLUX.2 style-conditioning workflow.",
+            style_strength,
+        )
+
+
+class Flux2PoseReference:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "face_detector": ("MODEL", ),
+                "image": ("IMAGE", ),
+                "width": ("INT", {"default": 864, "min": 0, "max": 2048, "step": 1}),
+                "height": ("INT", {"default": 1152, "min": 0, "max": 2048, "step": 1}),
+            },
+            "optional": {
+                "mask": ("MASK", ),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING")
+    RETURN_NAMES = ("pose_image", "reference_notes")
+    FUNCTION = "build_reference"
+    CATEGORY = "f2_infinite_you"
+
+    def build_reference(self, face_detector, image, width, height, mask=None):
+        pose_image = ExtractFacePoseImage().extract_face_pose(face_detector, image, width, height, mask)[0]
+        return (
+            pose_image,
+            "Use this pose image as a FLUX.2 pose reference or as input to a FLUX-compatible pose-control workflow. This node extracts the InfiniteYou facial pose overlay for convenient reference preparation.",
+        )
+
 class InfuseNetLoader:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": { "controlnet_name": (InfuseNetLoader.get_controlnet_names(), )}}
 
+    @staticmethod
     def get_controlnet_names():
         names = [
             os.path.join("sim_stage1", "infusenet_sim_bf16.safetensors"),
@@ -274,7 +376,7 @@ class InfuseNetLoader:
 
 class InfuseNetApply:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
         return {"required": {"positive": ("CONDITIONING", ),
                              "id_embedding": ("CONDITIONING", ),
                              "control_net": ("CONTROL_NET", ),
@@ -295,6 +397,16 @@ class InfuseNetApply:
     FUNCTION = "apply_controlnet"
 
     CATEGORY = "f2_infinite_you"
+
+    def _format_flux2_alternative_guidance(self):
+        identity = RECOMMENDED_FLUX2_ALTERNATIVES["identity"]
+        style = RECOMMENDED_FLUX2_ALTERNATIVES["style"]
+        pose = RECOMMENDED_FLUX2_ALTERNATIVES["pose"]
+        return (
+            "The official InfiniteYou auto-downloaded weights in this node pack are FLUX.1-dev models. "
+            f"For FLUX.2 workflows, use {identity['name']} for {identity['purpose']}, "
+            f"{style['name']} for {style['purpose']}, and {pose['name']} for {pose['purpose']}."
+        )
 
     def _validate_flux_compatibility(self, conditioning, id_embedding, control_net):
         control_model = getattr(control_net, "control_model", None)
@@ -328,7 +440,8 @@ class InfuseNetApply:
         ):
             raise ValueError(
                 f"The loaded InfuseNet checkpoint is internally inconsistent: img_in expects latent width {expected_latent_width} but pos_embed_input expects {hint_width}. "
-                "This checkpoint is not compatible with the active FLUX patch/token layout. Please re-download or select a matching checkpoint."
+                "This checkpoint is not compatible with the active FLUX patch/token layout. Please re-download or select a matching checkpoint. "
+                + self._format_flux2_alternative_guidance()
             )
 
         if conditioning is None or len(conditioning) == 0:
@@ -394,6 +507,9 @@ NODE_CLASS_MAPPINGS = {
     "F2_IDEmbeddingModelLoader": IDEmbeddingModelLoader,
     "F2_ExtractIDEmbedding": ExtractIDEmbedding,
     "F2_ExtractFacePoseImage": ExtractFacePoseImage,
+    "F2_Flux2IdentityReference": Flux2IdentityReference,
+    "F2_Flux2StyleReference": Flux2StyleReference,
+    "F2_Flux2PoseReference": Flux2PoseReference,
     "F2_InfuseNetApply": InfuseNetApply,
     "F2_InfuseNetLoader": InfuseNetLoader,
 }
@@ -402,6 +518,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "F2_IDEmbeddingModelLoader": "F2 ID Embedding Model Loader",
     "F2_ExtractIDEmbedding": "F2 Extract ID Embedding",
     "F2_ExtractFacePoseImage": "F2 Extract Face Pose Image",
+    "F2_Flux2IdentityReference": "F2 FLUX.2 Identity Reference",
+    "F2_Flux2StyleReference": "F2 FLUX.2 Style Reference",
+    "F2_Flux2PoseReference": "F2 FLUX.2 Pose Reference",
     "F2_InfuseNetApply": "F2 Apply InfuseNet",
     "F2_InfuseNetLoader": "F2 Load InfuseNet",
 }
